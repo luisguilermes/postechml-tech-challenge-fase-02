@@ -1,0 +1,82 @@
+@startuml B3_Pipeline_Sequence
+!theme plain
+
+title B3 Financial Data Pipeline - Sequence Diagram
+
+actor "External System" as ext
+participant "S3 Raw Bucket" as s3raw
+participant "Lambda Trigger" as lambda
+participant "Glue Job" as glue
+participant "S3 Refined Bucket" as s3refined
+participant "Glue Catalog" as catalog
+participant "Athena" as athena
+participant "Data Analyst" as analyst
+participant "S3 Results" as s3results
+
+== Data Ingestion ==
+
+ext -> s3raw: Upload B3 data\n(b3/2025-08-02/data.parquet)
+activate s3raw
+
+s3raw -> lambda: S3 ObjectCreated Event
+activate lambda
+
+lambda -> lambda: Parse S3 event\nExtract bucket, key, date
+lambda -> glue: Start job run\nArguments: --BUCKET, --DATE,\n--DATABASE_NAME, --TABLE_NAME
+activate glue
+
+== Data Processing ==
+
+glue -> s3raw: Read Parquet file
+s3raw -> glue: Return raw B3 data
+deactivate s3raw
+
+glue -> glue: Transform data:\n• Rename columns\n• Convert data types\n• Aggregate by ticker\n• Add partition columns
+
+glue -> s3refined: Write partitioned data\n(ano=2025/mes=8/dia=2/ticker=*)
+activate s3refined
+
+glue -> catalog: Create/Update table metadata\nDatabase: b3_pipeline_database\nTable: ibov_refinado
+activate catalog
+
+catalog -> catalog: Register partitions\nUpdate table schema
+catalog --> glue: Catalog updated
+deactivate catalog
+
+glue --> lambda: Job completed successfully
+deactivate glue
+
+lambda --> s3raw: Return success
+deactivate lambda
+
+== Data Analytics ==
+
+analyst -> athena: Execute SQL query\nSELECT * FROM b3_pipeline_database.ibov_refinado\nWHERE ticker='PETR4' LIMIT 10
+activate athena
+
+athena -> catalog: Get table metadata\nand partition information
+catalog -> athena: Return schema and partitions
+
+athena -> s3refined: Query partitioned data\n(partition pruning applied)
+s3refined -> athena: Return query results
+
+athena -> s3results: Store query results\n(CSV format)
+activate s3results
+
+athena -> analyst: Return query results
+deactivate athena
+
+== Visualization (Optional) ==
+
+analyst -> analyst: Use Jupyter Notebook\nfor data visualization
+analyst -> athena: Execute complex queries\nvia Boto3/AWS SDK
+athena -> s3results: Store visualization data
+s3results -> analyst: Provide data for charts
+deactivate s3results
+deactivate s3refined
+
+== Monitoring ==
+
+note over lambda, glue: All components log to CloudWatch\nfor monitoring and debugging
+
+@enduml

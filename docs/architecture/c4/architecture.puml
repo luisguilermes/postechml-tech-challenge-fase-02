@@ -1,0 +1,80 @@
+@startuml B3_Pipeline_Architecture
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title B3 Financial Data Pipeline - C4 Container Diagram
+
+Person(analyst, "Data Analyst", "Analyzes B3 financial data using SQL queries")
+Person(datascientist, "Data Scientist", "Creates visualizations and models from B3 data")
+
+System_Boundary(aws_cloud, "AWS Cloud") {
+
+    Container_Boundary(data_ingestion, "Data Ingestion Layer") {
+        Container(s3_raw, "S3 Raw Bucket", "Amazon S3", "Stores raw B3 financial data in Parquet format\n(b3-raw-pipeline-data)")
+        Container(lambda_trigger, "Lambda Trigger", "AWS Lambda", "Triggers Glue job when new data arrives\nPython 3.12 runtime")
+    }
+
+    Container_Boundary(data_processing, "Data Processing Layer") {
+        Container(glue_job, "Glue ETL Job", "AWS Glue", "Transforms and aggregates B3 data\nPySpark script (etl_bovespa.py)")
+        Container(s3_refined, "S3 Refined Bucket", "Amazon S3", "Stores processed data partitioned by\nyear/month/day/ticker")
+        Container(glue_catalog, "Glue Data Catalog", "AWS Glue", "Metadata repository\nDatabase: b3_pipeline_database\nTable: ibov_refinado")
+    }
+
+    Container_Boundary(data_analytics, "Data Analytics Layer") {
+        Container(athena, "Athena", "Amazon Athena", "SQL query engine for data analysis\nWorkgroup: b3-pipeline-workgroup")
+        Container(s3_athena, "S3 Athena Results", "Amazon S3", "Stores query results\n(b3-athena-query-results-*)")
+        Container(named_queries, "Named Queries", "Amazon Athena", "Pre-built analytical queries:\n• Daily Market Summary\n• Top Stocks by Volume\n• Stock Performance Analysis")
+    }
+
+    Container_Boundary(visualization, "Visualization Layer") {
+        Container(jupyter_notebook, "Jupyter Notebook", "Local/Cloud", "Data visualization and analysis\nPlotly, Pandas, AWS SDK")
+    }
+
+    Container_Boundary(infrastructure, "Infrastructure Layer") {
+        Container(iam_roles, "IAM Roles", "AWS IAM", "Security roles and policies\n• Lambda execution role\n• Glue service role")
+        Container(s3_lambda_code, "S3 Code Bucket", "Amazon S3", "Stores Lambda and Glue scripts\n(b3-lambda-pipeline-code)")
+        Container(terraform, "Terraform", "HashiCorp", "Infrastructure as Code\nModular configuration")
+    }
+}
+
+System_Ext(b3_api, "B3 API", "External B3 financial data source")
+
+' Data Flow Relationships
+Rel(b3_api, s3_raw, "Uploads daily financial data", "Parquet files")
+Rel(s3_raw, lambda_trigger, "Triggers on S3 ObjectCreated", "S3 Event")
+Rel(lambda_trigger, glue_job, "Starts job run", "Glue API")
+Rel(glue_job, s3_raw, "Reads raw data", "S3 API")
+Rel(glue_job, s3_refined, "Writes processed data", "Partitioned Parquet")
+Rel(glue_job, glue_catalog, "Creates/updates table metadata", "Glue Catalog API")
+
+' Analytics Relationships
+Rel(analyst, athena, "Executes SQL queries", "AWS Console/CLI")
+Rel(datascientist, athena, "Runs analytical queries", "AWS Console/CLI")
+Rel(athena, glue_catalog, "Reads table metadata", "Glue Catalog API")
+Rel(athena, s3_refined, "Queries partitioned data", "S3 Select")
+Rel(athena, s3_athena, "Stores query results", "CSV/JSON")
+Rel(athena, named_queries, "Uses pre-built queries", "Athena API")
+
+' Visualization
+Rel(datascientist, jupyter_notebook, "Creates visualizations", "Python/Jupyter")
+Rel(jupyter_notebook, athena, "Executes queries", "Boto3/AWS SDK")
+
+' Infrastructure
+Rel(terraform, s3_raw, "Provisions", "Terraform AWS Provider")
+Rel(terraform, s3_refined, "Provisions", "Terraform AWS Provider")
+Rel(terraform, s3_athena, "Provisions", "Terraform AWS Provider")
+Rel(terraform, s3_lambda_code, "Provisions", "Terraform AWS Provider")
+Rel(terraform, lambda_trigger, "Deploys", "Terraform AWS Provider")
+Rel(terraform, glue_job, "Creates", "Terraform AWS Provider")
+Rel(terraform, glue_catalog, "Configures", "Terraform AWS Provider")
+Rel(terraform, athena, "Sets up workgroup", "Terraform AWS Provider")
+Rel(terraform, iam_roles, "Creates roles/policies", "Terraform AWS Provider")
+
+Rel(lambda_trigger, iam_roles, "Assumes execution role", "AWS IAM")
+Rel(glue_job, iam_roles, "Assumes service role", "AWS IAM")
+Rel(s3_lambda_code, lambda_trigger, "Stores function code", "ZIP deployment")
+Rel(s3_lambda_code, glue_job, "Stores ETL script", "Python script")
+
+@enduml

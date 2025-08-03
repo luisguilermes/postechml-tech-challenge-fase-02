@@ -1,0 +1,73 @@
+@startuml B3_Pipeline_Components
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title B3 Financial Data Pipeline - C4 Component Diagram (Data Processing Detail)
+
+Container_Boundary(lambda_container, "Lambda Trigger Function") {
+    Component(lambda_handler, "Lambda Handler", "Python", "Processes S3 events and triggers Glue jobs")
+    Component(lambda_s3_parser, "S3 Event Parser", "Python", "Extracts bucket, key, and date from S3 events")
+    Component(lambda_glue_client, "Glue Client", "Boto3", "Starts Glue job runs with arguments")
+}
+
+Container_Boundary(glue_container, "Glue ETL Job") {
+    Component(glue_spark_context, "Spark Context", "PySpark", "Initializes Spark and Glue contexts")
+    Component(glue_data_reader, "Data Reader", "PySpark", "Reads Parquet files from S3 raw bucket")
+    Component(glue_transformer, "Data Transformer", "PySpark", "Transforms and aggregates B3 data:\n• Renames columns\n• Converts data types\n• Aggregates by ticker")
+    Component(glue_partitioner, "Data Partitioner", "PySpark", "Creates partition columns:\n• ano (year)\n• mes (month)\n• dia (day)\n• ticker")
+    Component(glue_writer, "Data Writer", "AWS Glue", "Writes to S3 and catalogs metadata")
+    Component(glue_catalog_client, "Catalog Client", "AWS Glue", "Creates/updates table in Glue Catalog")
+}
+
+Container_Boundary(athena_container, "Athena Query Engine") {
+    Component(athena_workgroup, "Workgroup Manager", "Amazon Athena", "Manages query execution settings\nWorkgroup: b3-pipeline-workgroup")
+    Component(athena_query_engine, "Query Engine", "Presto", "Executes SQL queries on partitioned data")
+    Component(athena_partition_pruning, "Partition Pruning", "Amazon Athena", "Optimizes queries using partition projection")
+    Component(athena_result_writer, "Result Writer", "Amazon Athena", "Writes query results to S3")
+}
+
+Container_Boundary(s3_storage, "S3 Storage Layer") {
+    Component(s3_raw_storage, "Raw Data Storage", "Amazon S3", "Path: s3://b3-raw-pipeline-data/b3/YYYY-MM-DD/\nFormat: Parquet")
+    Component(s3_refined_storage, "Refined Data Storage", "Amazon S3", "Path: s3://b3-refined-pipeline-data/refined/b3/\nPartitions: ano=*/mes=*/dia=*/ticker=*")
+    Component(s3_code_storage, "Code Storage", "Amazon S3", "Stores Lambda ZIP and Glue scripts")
+    Component(s3_results_storage, "Results Storage", "Amazon S3", "Query results in CSV/JSON format")
+}
+
+Container_Boundary(catalog_container, "Glue Data Catalog") {
+    Component(catalog_database, "Database", "AWS Glue", "Database: b3_pipeline_database")
+    Component(catalog_table, "Table Schema", "AWS Glue", "Table: ibov_refinado\nColumns: ticker, empresa, type, etc.\nPartitions: ano, mes, dia, ticker")
+    Component(catalog_partitions, "Partition Metadata", "AWS Glue", "Stores partition locations and statistics")
+}
+
+' Data Flow - Ingestion
+Rel(lambda_handler, lambda_s3_parser, "Parses S3 event", "JSON")
+Rel(lambda_s3_parser, lambda_glue_client, "Provides job arguments", "Dict")
+Rel(lambda_glue_client, glue_spark_context, "Starts job run", "Glue API")
+
+' Data Flow - Processing  
+Rel(glue_spark_context, glue_data_reader, "Initializes reader", "SparkContext")
+Rel(glue_data_reader, s3_raw_storage, "Reads Parquet files", "S3 API")
+Rel(glue_data_reader, glue_transformer, "Provides DataFrame", "PySpark")
+Rel(glue_transformer, glue_partitioner, "Passes transformed data", "DataFrame")
+Rel(glue_partitioner, glue_writer, "Adds partition columns", "DataFrame")
+Rel(glue_writer, s3_refined_storage, "Writes partitioned data", "Parquet")
+Rel(glue_writer, glue_catalog_client, "Triggers catalog update", "Glue API")
+Rel(glue_catalog_client, catalog_database, "Updates metadata", "Glue Catalog API")
+Rel(glue_catalog_client, catalog_table, "Updates table schema", "Glue Catalog API")
+Rel(glue_catalog_client, catalog_partitions, "Registers partitions", "Glue Catalog API")
+
+' Data Flow - Analytics
+Rel(athena_workgroup, athena_query_engine, "Configures execution", "Settings")
+Rel(athena_query_engine, catalog_table, "Reads table metadata", "Glue Catalog API")
+Rel(athena_query_engine, catalog_partitions, "Gets partition info", "Glue Catalog API")
+Rel(athena_partition_pruning, s3_refined_storage, "Reads only relevant partitions", "S3 Select")
+Rel(athena_query_engine, athena_partition_pruning, "Applies partition filters", "SQL")
+Rel(athena_query_engine, athena_result_writer, "Sends query results", "ResultSet")
+Rel(athena_result_writer, s3_results_storage, "Stores results", "CSV/JSON")
+
+' Code Dependencies
+Rel(lambda_handler, s3_code_storage, "Loads function code", "ZIP")
+Rel(glue_spark_context, s3_code_storage, "Loads ETL script", "Python")
+
+@enduml

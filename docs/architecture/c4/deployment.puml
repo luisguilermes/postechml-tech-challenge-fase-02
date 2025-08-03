@@ -1,0 +1,85 @@
+@startuml B3_Pipeline_Deployment
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Deployment.puml
+
+LAYOUT_WITH_LEGEND()
+
+title B3 Financial Data Pipeline - Deployment Diagram
+
+Deployment_Node(aws_region, "AWS Region (us-east-1)", "Amazon Web Services") {
+    
+    Deployment_Node(s3_service, "Amazon S3", "Object Storage Service") {
+        Container(s3_raw, "b3-raw-pipeline-data", "S3 Bucket", "Raw B3 financial data")
+        Container(s3_refined, "b3-refined-pipeline-data", "S3 Bucket", "Processed and partitioned data")
+        Container(s3_lambda_code, "b3-lambda-pipeline-code", "S3 Bucket", "Lambda functions and Glue scripts")
+        Container(s3_athena_results, "b3-athena-query-results-*", "S3 Bucket", "Query results storage")
+    }
+    
+    Deployment_Node(lambda_service, "AWS Lambda", "Serverless Compute") {
+        Container(lambda_function, "b3-pipeline-trigger-glue", "Lambda Function", "Python 3.12\n30s timeout\nTriggered by S3 events")
+    }
+    
+    Deployment_Node(glue_service, "AWS Glue", "ETL Service") {
+        Container(glue_job, "b3-pipeline-etl-bovespa", "Glue Job", "PySpark ETL job\nGlue version 4.0\n2 x G.1X workers")
+        Container(glue_database, "b3_pipeline_database", "Glue Database", "Metadata database")
+        Container(glue_table, "ibov_refinado", "Glue Table", "Table with partition projection")
+    }
+    
+    Deployment_Node(athena_service, "Amazon Athena", "Query Service") {
+        Container(athena_workgroup, "b3-pipeline-workgroup", "Workgroup", "Query execution environment")
+        Container(named_query1, "Daily_Market_Summary", "Named Query", "Pre-built analytical query")
+        Container(named_query2, "Top_Stocks_by_Volume", "Named Query", "Pre-built analytical query")
+        Container(named_query3, "Stock_Performance_Analysis", "Named Query", "Pre-built analytical query")
+    }
+    
+    Deployment_Node(iam_service, "AWS IAM", "Identity and Access Management") {
+        Container(lambda_role, "b3-pipeline-lambda-role", "IAM Role", "Lambda execution role")
+        Container(glue_role, "b3-pipeline-glue-role", "IAM Role", "Glue service role")
+        Container(lambda_policy, "lambda-glue-invoke-policy", "IAM Policy", "Allows Lambda to start Glue jobs")
+        Container(glue_policy, "glue-s3-access-policy", "IAM Policy", "Allows Glue to access S3 and Catalog")
+    }
+}
+
+Deployment_Node(terraform_workspace, "Local Development", "Terraform Workspace") {
+    Container(terraform_main, "main.tf", "Terraform Configuration", "Root module orchestration")
+    Container(terraform_s3, "modules/s3", "Terraform Module", "S3 buckets and objects")
+    Container(terraform_lambda, "modules/lambda", "Terraform Module", "Lambda function deployment")
+    Container(terraform_glue, "modules/glue", "Terraform Module", "Glue job and catalog setup")
+    Container(terraform_athena, "modules/athena", "Terraform Module", "Athena workgroup and queries")
+    Container(terraform_iam, "modules/iam", "Terraform Module", "IAM roles and policies")
+}
+
+Deployment_Node(jupyter_env, "Data Science Environment", "Local/Cloud") {
+    Container(jupyter_notebook, "B3_Pipeline_Enhancement.ipynb", "Jupyter Notebook", "Data visualization and analysis\nPlotly, Pandas, Boto3")
+}
+
+' Deployment relationships
+Rel(terraform_main, terraform_s3, "Includes module", "Terraform")
+Rel(terraform_main, terraform_lambda, "Includes module", "Terraform")
+Rel(terraform_main, terraform_glue, "Includes module", "Terraform")
+Rel(terraform_main, terraform_athena, "Includes module", "Terraform")
+Rel(terraform_main, terraform_iam, "Includes module", "Terraform")
+
+' Terraform provisions AWS resources
+Rel(terraform_s3, s3_raw, "Provisions", "AWS Provider")
+Rel(terraform_s3, s3_refined, "Provisions", "AWS Provider")
+Rel(terraform_s3, s3_lambda_code, "Provisions", "AWS Provider")
+Rel(terraform_lambda, lambda_function, "Deploys", "AWS Provider")
+Rel(terraform_glue, glue_job, "Creates", "AWS Provider")
+Rel(terraform_glue, glue_database, "Creates", "AWS Provider")
+Rel(terraform_glue, glue_table, "Creates", "AWS Provider")
+Rel(terraform_athena, athena_workgroup, "Creates", "AWS Provider")
+Rel(terraform_athena, s3_athena_results, "Provisions", "AWS Provider")
+Rel(terraform_athena, named_query1, "Creates", "AWS Provider")
+Rel(terraform_athena, named_query2, "Creates", "AWS Provider")
+Rel(terraform_athena, named_query3, "Creates", "AWS Provider")
+Rel(terraform_iam, lambda_role, "Creates", "AWS Provider")
+Rel(terraform_iam, glue_role, "Creates", "AWS Provider")
+Rel(terraform_iam, lambda_policy, "Creates", "AWS Provider")
+Rel(terraform_iam, glue_policy, "Creates", "AWS Provider")
+
+' Runtime relationships
+Rel(lambda_function, lambda_role, "Assumes", "AWS IAM")
+Rel(glue_job, glue_role, "Assumes", "AWS IAM")
+Rel(jupyter_notebook, athena_workgroup, "Queries via", "Boto3")
+
+@enduml
