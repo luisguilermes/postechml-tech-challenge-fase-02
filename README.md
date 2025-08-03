@@ -17,7 +17,6 @@ Este projeto provisiona, com Terraform, toda a infraestrutura necessária para e
 | **Glue Job**     | Processamento e transformação dos dados (ex: JSON → Parquet) |
 | **Glue Crawler** | Criação/atualização do catálogo de dados no Glue             |
 | **Athena**       | Consultas SQL sobre os dados tratados                        |
-| **EventBridge**  | Agendamento diário para execução automática da função Lambda |
 
 ---
 
